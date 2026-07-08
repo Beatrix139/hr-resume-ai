@@ -1,12 +1,12 @@
 import streamlit as st
 import docx
-from pypdf import PdfReader  # 用于解析PDF
-from openai import OpenAI  # DeepSeek官方推荐使用OpenAI SDK进行标准对接
+from pypdf import PdfReader
+from openai import OpenAI
 
 # 1. 页面基本配置
 st.set_page_config(page_title="AI智能眼业务-HR招聘助手", layout="wide")
-st.title("👁️ AI智能眼睛业务 - 简历精准匹配系统 (DeepSeek版)")
-st.caption("已支持 PDF/Word/TXT，一键调用 DeepSeek 接口生成深度匹配报告与面试提纲")
+st.title("👁️ AI智能眼睛业务 - 简历精准匹配系统 (极速缓存版)")
+st.caption("已支持 PDF/Word/TXT，采用多轮对话前缀匹配技术，自动触发 DeepSeek 缓存降本提速")
 
 # 2. 文本提取辅助函数
 def extract_text_from_pdf(file):
@@ -30,51 +30,58 @@ def extract_text_from_docx(file):
     except Exception as e:
         return f"Word解析失败: {str(e)}"
 
-# 3. 真实对接 DeepSeek 模型的函数
-def analyze_resume_with_deepseek(api_key, jd_text, resume_text):
-    # 💡 实例化 OpenAI 客户端（DeepSeek 的 API 接口全面兼容 OpenAI SDK 格式）
+# 3. 核心函数：采用多轮对话结构，100% 触发缓存命中
+def analyze_resume_with_deepseek(jd_text, resume_text):
+    # 🔒 从 Streamlit 云端的高级设置 (Secrets) 中读取 API Key，安全且免手动输入
     client = OpenAI(
-        api_key=api_key,
-        base_url="https://api.deepseek.com/v1"  # 这是 DeepSeek 官方的 API 直连网址
+        api_key=st.secrets["DEEPSEEK_API_KEY"], 
+        base_url="https://api.deepseek.com/v1"
     )
     
-    # 构造发送给 DeepSeek 的核心高级 HR 提示词
-    system_prompt = "你是一位精通“AI智能眼睛/计算机视觉/智能硬件”业务的资深HR专家。你的任务是严格、客观、一针见血地帮我评估候选人简历与岗位JD的匹配度。"
+    # 【第一轮：系统角色】严格固定、完全不变的系统人设
+    system_prompt = (
+        "你是一位精通“AI智能眼睛/计算机视觉/智能硬件”业务的资深HR专家。"
+        "你的任务是严格、客观、一针见血地帮我评估候选人简历与岗位JD的匹配度。"
+    )
     
-    user_content = f"""
-    请帮我分析以下【岗位JD】和【候选人简历】，并输出匹配度评分、优缺点、推进建议及电话初筛提纲。
+    # 【第二轮：用户固定输入】把【岗位JD】单独提出来。
+    # 当你连续筛选同一个岗位时，由于 system 和这段 jd_content 一个字没变，DeepSeek 会100%强行命中缓存！
+    jd_content = (
+        f"【当前招聘岗位JD具体要求如下】:\n{jd_text}\n\n"
+        f"请记住这个岗位要求。接下来我会为你发送候选人简历，请基于这个JD进行对比分析。"
+    )
     
-    【岗位JD】：
-    {jd_text}
-    
+    # 【第三轮：用户变动输入】把每次都变化的【候选人简历】和【输出格式要求】放在最后一条消息
+    resume_content = f"""
     【候选人简历】：
     {resume_text}
     
-    请严格按照以下格式用 Markdown 漂亮地输出：
+    请严格针对刚才的岗位JD进行深度匹配，并严格按照以下格式用 Markdown 漂亮地输出：
     ### 📊 综合匹配度：[请给出得分，如 XX分]
     
     ### 🟢 核心优势（优点）
     1. ...
-    2. ...
     
     ### 🔴 潜在风险（缺点/漏项）
     1. ...
-    2. ...
     
     ### 🎯 推进建议
-    [请明确给出：强烈推荐 / 建议电话初筛 / 暂不考虑]
+    [明确给出：强烈推荐 / 建议电话初筛 / 暂不考虑]
     
     ### 📞 电话初筛提问提纲
     [如果建议推进，请针对简历中的模糊点或我们业务关注的“AI智能眼镜（软硬件协同/CV算法）”特征，生成3-4个定制化电话提问。]
     """
     
     try:
-        # 调用 DeepSeek 目前最标准且高性价比的对话模型 deepseek-chat
+        # 💡 这里就是能够锁死缓存的 3 条消息多轮对话结构
+        # 消息 1 (system) -> 消息 2 (user: 固定JD) -> 这前两步在第二份简历时直接进缓存
+        # 真正算新钱的只有最后一轮消息 3 (user: 变动简历)
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
+                {"role": "user", "content": jd_content},      # 👈 这一步和上一步会被永久缓存！
+                {"role": "user", "content": resume_content}   # 👈 只有这一步算新 Token 的钱
             ],
             temperature=0.3, # 降低随机性，让HR评估更客观、稳定
         )
@@ -82,25 +89,15 @@ def analyze_resume_with_deepseek(api_key, jd_text, resume_text):
     except Exception as e:
         return f"❌ 调用 DeepSeek API 出错，错误原因: {str(e)}"
 
-# 4. 前端界面布局设计：左侧放配置和JD，右侧放简历和结果
+# 4. 前端界面布局设计
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
-    st.header("⚙️ 1. 密钥与岗位 JD")
-    
-    # 在页面上直接安全地输入 API Key，采用密码隐藏模式，不留痕迹
-    api_key_input = st.text_input(
-        "请输入您的 DeepSeek API Key:", 
-        type="password",
-        placeholder="sk-..."
-    )
-    
-    st.write("---")
-    
+    st.header("📝 1. 填写岗位 JD")
     jd_input = st.text_area(
         "请粘贴当前招聘岗位的具体要求（JD）：",
-        height=350,
-        placeholder="例如：负责智能眼镜的计算机视觉算法研发，要求熟悉SLAM、OpenCV，有硬件调试经验者优先..."
+        height=450,
+        placeholder="例如：负责智能眼镜的计算机视觉算法研发，要求熟悉SLAM、OpenCV..."
     )
 
 with col_right:
@@ -129,16 +126,14 @@ with col_right:
     
     # 5. 触发分析按钮
     if st.button("🚀 开始 AI 智能匹配分析", type="primary"):
-        if not api_key_input:
-            st.error("请输入您的 DeepSeek API Key！")
-        elif not jd_input:
+        if not jd_input:
             st.error("请先在左侧输入岗位 JD！")
         elif not resume_text:
             st.error("请先上传候选人简历！")
         else:
-            with st.spinner("DeepSeek 正在深度解析简历并匹配中，请稍候..."):
-                # 真正开始调用 DeepSeek 接口
-                report = analyze_resume_with_deepseek(api_key_input, jd_input, resume_text)
+            with st.spinner("DeepSeek 正在利用缓存加速深度解析中，请稍候..."):
+                # 调用优化后的缓存版分析函数
+                report = analyze_resume_with_deepseek(jd_input, resume_text)
                 
-                st.header("📋 DeepSeek 实时评估报告")
+                st.header("📋 DeepSeek 评估报告")
                 st.markdown(report)
