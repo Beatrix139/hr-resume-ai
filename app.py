@@ -72,7 +72,11 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
         )
         return response.choices[0].message.content
     
-    请严格针对刚才的岗位JD进行深度匹配,并严格按照以下格式用 Markdown 漂亮地输出：
+    resume_content = f"""
+    【候选人简历】：
+    {resume_text}
+    
+    请严格针对刚才的岗位JD进行深度匹配,并严格按照以下格式用 Markdown 漂亮地输出:
     ### 📊 综合匹配度：[请给出得分，如 XX分]
     
     ### 🟢 核心优势（优点）
@@ -85,7 +89,7 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
     [明确给出：强烈推荐 / 建议电话初筛 / 暂不考虑]
     
     ### 📞 电话初筛提问提纲
-    [如果建议推进，请针对简历中的模糊点或我们业务关注的“AI智能眼镜（软硬件协同/CV算法）”特征，生成3-4个定制化电话提问。]
+    [定制化提问]
     """
     
     try:
