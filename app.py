@@ -38,10 +38,13 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
         base_url="https://api.deepseek.com/v1"
     )
     
-    # 【第一轮：系统角色】严格固定、完全不变的系统人设
+   # 【第一轮：系统角色】加入了防止乱码误判的终极警告
     system_prompt = (
         "你是一位精通“AI智能眼睛/计算机视觉/智能硬件”业务的资深HR专家。"
         "你的任务是严格、客观、一针见血地帮我评估候选人简历与岗位JD的匹配度。"
+        "⚠️特别声明：本系统在从PDF提取文本时，可能会因为字体编码问题导致简历中出现部分无意义的乱码、错别字或特殊符号。"
+        "这完全是【系统提取文本的技术缺陷】导致的，绝非候选人粗心或简历质量问题！"
+        "请你在评估时，【必须完全忽略所有乱码和奇怪的排版符号】，仅根据你能够读懂的正常文本、上下文逻辑来客观评估候选人的经历与能力，绝对不允许在报告中指责候选人简历乱码或不细心！"
     )
     
     # 【第二轮：用户固定输入】把【岗位JD】单独提出来。
@@ -51,10 +54,23 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
         f"请记住这个岗位要求。接下来我会为你发送候选人简历，请基于这个JD进行对比分析。"
     )
     
-    # 【第三轮：用户变动输入】把每次都变化的【候选人简历】和【输出格式要求】放在最后一条消息
-    resume_content = f"""
-    【候选人简历】：
-    {resume_text}
+    # 【第三轮：用户变动输入】
+    # 💡 优化：用 str() 强行把简历转为纯字符串，并用 .strip() 裁掉可能含有的动态空格或隐形换行
+    clean_resume_text = str(resume_text).strip()
+    
+    resume_content = f"【候选人简历纯文本内容如下】:\n{clean_resume_text}\n\n请严格针对刚才的岗位JD进行深度匹配分析并输出报告。"
+    
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": jd_content},      # 
+                {"role": "user", "content": resume_content}   # 
+            ],
+            temperature=0.3, 
+        )
+        return response.choices[0].message.content
     
     请严格针对刚才的岗位JD进行深度匹配，并严格按照以下格式用 Markdown 漂亮地输出：
     ### 📊 综合匹配度：[请给出得分，如 XX分]
