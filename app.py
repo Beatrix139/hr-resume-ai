@@ -30,12 +30,20 @@ def extract_text_from_docx(file):
     except Exception as e:
         return f"Word解析失败: {str(e)}"
 
+# 💡 补全核心：用 st.cache_resource 锁死大模型客户端，防止重复创建破坏缓存
+@st.cache_resource
+def get_deepseek_client():
+    return OpenAI(
+        api_key=st.secrets["DEEPSEEK_API_KEY"], 
+        base_url="https://api.deepseek.com/v1"
+    )
+
 # 3. 核心函数：采用多轮对话结构 + 锁定客户端
 def analyze_resume_with_deepseek(jd_text, resume_text):
     # 调用锁死在内存里的客户端，保证每次请求的底层通道完全一致
     client = get_deepseek_client()
     
-    # 【第一轮：系统角色】严格固定、完全不变的系统人设
+    # 【第一轮：系统角色】严格固定、完全不变的系统人设 + 乱码免疫警告
     system_prompt = (
         "你是一位精通“AI智能眼睛/计算机视觉/智能硬件”业务的资深HR专家。"
         "你的任务是严格、客观、一针见血地帮我评估候选人简历与岗位JD的匹配度。"
@@ -50,7 +58,7 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
         f"请记住这个岗位要求。接下来我会为你发送候选人简历，请基于这个JD进行对比分析。"
     )
     
-    # 💡 组装【第三轮：用户变动输入】。注意：这段代码必须放在 try 的外面！
+    # 组装【第三轮：用户变动输入】
     clean_resume_text = str(resume_text).strip()
     resume_content = f"""
     【候选人简历纯文本内容如下】：
@@ -78,47 +86,10 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": jd_content},      
-                {"role": "user", "content": resume_content}   
+                {"role": "user", "content": jd_content},      # 👈 这一步和上一步会被自动缓存！
+                {"role": "user", "content": resume_content}   # 👈 只有这一步算新变动简历的钱
             ],
             temperature=0.3, 
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ 调用 DeepSeek API 出错，错误原因: {str(e)}"
-    
-    resume_content = f"""
-    【候选人简历】：
-    {resume_text}
-    
-    请严格针对刚才的岗位JD进行深度匹配,并严格按照以下格式用 Markdown 漂亮地输出:
-    ### 📊 综合匹配度：[请给出得分，如 XX分]
-    
-    ### 🟢 核心优势（优点）
-    1. ...
-    
-    ### 🔴 潜在风险（缺点/漏项）
-    1. ...
-    
-    ### 🎯 推进建议
-    [明确给出：强烈推荐 / 建议电话初筛 / 暂不考虑]
-    
-    ### 📞 电话初筛提问提纲
-    [定制化提问]
-    """
-    
-    try:
-        # 💡 这里就是能够锁死缓存的 3 条消息多轮对话结构
-        # 消息 1 (system) -> 消息 2 (user: 固定JD) -> 这前两步在第二份简历时直接进缓存
-        # 真正算新钱的只有最后一轮消息 3 (user: 变动简历)
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": jd_content},      # 👈 这一步和上一步会被永久缓存！
-                {"role": "user", "content": resume_content}   # 👈 只有这一步算新 Token 的钱
-            ],
-            temperature=0.3, # 降低随机性，让HR评估更客观、稳定
         )
         return response.choices[0].message.content
     except Exception as e:
