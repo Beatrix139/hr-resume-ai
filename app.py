@@ -72,7 +72,7 @@ def analyze_resume_with_deepseek(jd_text, resume_text):
         )
         return response.choices[0].message.content
     
-    请严格针对刚才的岗位JD进行深度匹配，并严格按照以下格式用 Markdown 漂亮地输出：
+    请严格针对刚才的岗位JD进行深度匹配,并严格按照以下格式用 Markdown 漂亮地输出：
     ### 📊 综合匹配度：[请给出得分，如 XX分]
     
     ### 🟢 核心优势（优点）
